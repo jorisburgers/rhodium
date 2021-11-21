@@ -15,8 +15,6 @@ import Rhodium.Solver.Rules
 
 import Rhodium.Blamer.HeuristicState
 
-import Debug.Trace
-
 -- | Represents the state of the type graph solver
 type TGStateM m axiom touchable types constraint ci = StateT (TGState m axiom touchable types constraint ci) m
 

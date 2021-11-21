@@ -12,8 +12,6 @@ import Rhodium.TypeGraphs.GraphProperties
 
 import Rhodium.Solver.Rules
 
-import Debug.Trace
-
 -- | Does the graph have an error in the specific group
 hasErrors :: (Show touchable, Show types, Show constraint, IsEquality types constraint touchable) => TGGraph touchable types constraint ci -> Bool
 hasErrors g = hasErrorEdges (M.elems (edges g)) || hasResidualEdges g (M.elems (edges g))

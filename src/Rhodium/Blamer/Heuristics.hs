@@ -1,6 +1,8 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE TupleSections #-}
 -- | A module describing heuristics for type errors
 module Rhodium.Blamer.Heuristics where
 
@@ -10,20 +12,15 @@ import Rhodium.Solver.Simplifier
 import Rhodium.TypeGraphs.Graph
 import Rhodium.TypeGraphs.GraphUtils
 import Rhodium.TypeGraphs.GraphProperties
-import Rhodium.TypeGraphs.GraphReset
 
 import Rhodium.Blamer.ErrorUtils
 import Rhodium.Blamer.Path
 
 import Data.List
-import Data.Maybe
-
 import Control.Monad
-import Control.Arrow
 
 import qualified Data.Map as M 
 
-import Debug.Trace
 
 -- | A function from a path to a list of heuristics
 type Heuristics m axiom touchable types constraint ci = Path m axiom touchable types constraint ci -> [Heuristic m axiom touchable types constraint ci]
@@ -79,7 +76,7 @@ applyGraphModifier  :: HasTypeGraph m axiom touchable types constraint ci
                     -> m (TGGraph touchable types constraint ci, ci ) 
 applyGraphModifier param gm graph = do
     (g', ci) <- gm param graph
-    (\g' -> (g', ci)) <$> simplifyGraph False g'
+    (, ci) <$> simplifyGraph False g'
 
 -- | Evaluate the heuristics on the path    
 evalHeuristic   :: HasTypeGraph m axiom touchable types constraint ci 
@@ -87,8 +84,8 @@ evalHeuristic   :: HasTypeGraph m axiom touchable types constraint ci
                 -> Path m axiom touchable types constraint ci -- ^Edges that are allowed to be modified, might nog be continious
                 -> TGGraph touchable types constraint ci 
                 -> m (ci, EdgeId, (constraint, ErrorLabel), GraphModifier m axiom touchable types constraint ci)
-evalHeuristic [] (Path _ []) graph = error "All paths removed by heuristics"
-evalHeuristic [] (Path cl@(_, c, l) ((_, eid, ci, gm) : re)) graph = do
+evalHeuristic [] (Path _ []) _graph = error "All paths removed by heuristics"
+evalHeuristic [] (Path cl@(_, c, l) ((_, eid, ci, gm) : re)) _graph = do
     logMsg " ---------- Result of heuristics ----------"
     logMsg ("Blamed edge: " ++ show eid ++ " with label " ++ show l)  
     unless (null re) (logMsg ("Remaining edges that cannot be reduced by heuristics: " ++ show (idsFromPath $ Path cl re)))
@@ -120,38 +117,37 @@ evalHeuristic (h:hs) p@(Path label es) graph =
                             logMsg "Unfortunately, none of the heuristics could be applied"
                             when (null es) (error ("voting" ++ " removed everything!")) 
                             evalHeuristic hs p graph
-                xs  ->   do 
+                _  ->   do 
                             when (null remainingEdges) (error ("voting" ++ " removed everything!")) 
                             logMsg ("Apply voting result: " ++ show heuristicNames)
                             logMsg ("Selected with priority "++show thePrio++": "++ show (map (\(_, ei, _, _) -> ei) remainingEdges) ++"\n")
                             evalHeuristic hs (Path label remainingEdges) (updateConstraintInformation (map (\(_, ei, ci, _) -> (ei, ci)) remainingEdges) graph)
-        _ -> error "Unknown heuristic type"
 
 -- | Evaluate a voting heuristic, letting all voting heuristics vote on the path        
 evalVoteHeuristic   :: HasTypeGraph m axiom touchable types constraint ci 
                     => Path m axiom touchable types constraint ci
                     -> VotingHeuristic m axiom touchable types constraint ci 
                     -> m [(Int, String, constraint, EdgeId, ci, GraphModifier m axiom touchable types constraint ci)]
-evalVoteHeuristic p@(Path label edges) vh = 
+evalVoteHeuristic (Path _label edges') vh = 
     case vh of
         SingleVoting s f -> let
-                op list e@(constraint, eid, ci, _) = do
+                op list e@(constraint', eid, ci, _) = do
                     r <- f e
                     case r of
                         Nothing -> return list
-                        Just x@(v, s, _, _, _, _) -> do
-                            logMsg ("    " ++ s)
-                            logMsg ("    Result: " ++ show (v, constraint, eid, ci))
+                        Just x@(v, s', _, _, _, _) -> do
+                            logMsg ("    " ++ s')
+                            logMsg ("    Result: " ++ show (v, constraint', eid, ci))
                             return (x : list)
             in do 
                 logMsg ('-' : s)
-                foldM op [] edges
+                foldM op [] edges'
         MultiVoting s f -> do
             logMsg ('-' : s)
-            es <- f edges
+            es <- f edges'
             case es of
                 Nothing -> return []
-                Just x -> error (show s)
+                Just _ -> error (show s)
  
 -- | Displays an additional message in the log, depending on the length of the lists
 shrunkAndFinalMsg :: [a] -> [a] -> String
@@ -171,7 +167,7 @@ shrunkAndFinalMsg old new =
 
 
 highParticipation :: (HasLogInfo m, HasTypeGraph m axiom touchable types constraint ci) => Double -> Path m axiom touchable types constraint ci -> Heuristic m axiom touchable types constraint ci
-highParticipation ratio path =
+highParticipation ratio _path =
     Filter "Participation ratio" selectTheBest
         where
             selectTheBest :: HasTypeGraph m axiom touchable types constraint ci => [(constraint, EdgeId, ci, GraphModifier m axiom touchable types constraint ci)] -> m [(constraint, EdgeId, ci, GraphModifier m axiom touchable types constraint ci)]
@@ -194,7 +190,7 @@ highParticipation ratio path =
                     -- prints a nice report
                     mymsg  = unlines ("" : title : replicate 100 '-' : map f es)
                     title  = "cnr  constraint                                                                ratio   info"
-                    f (cons, cnr, info, gm) = 
+                    f (cons, cnr, info, _gm) = 
                         take 5  (show cnr++(if cnr `elem` goodCNrs then "*" else "")++repeat ' ') ++
                         take 74 (show cons++repeat ' ') ++
                         take 8  (show (M.findWithDefault 0 cnr fm * 100 `div` nrOfPaths)++"%"++repeat ' ') ++

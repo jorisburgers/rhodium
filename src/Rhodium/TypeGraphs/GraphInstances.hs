@@ -3,29 +3,25 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | A number of default instances for TGState
 module Rhodium.TypeGraphs.GraphInstances where
 
-import Control.Monad.Trans.State
+import Control.Monad.Trans.State (get, put)
 
 import Data.List
-import Data.Maybe
 
 import Rhodium.TypeGraphs.GraphProperties
 import Rhodium.TypeGraphs.TGState
 import Rhodium.TypeGraphs.Graph
 
-import Rhodium.Blamer.HeuristicState
-import Rhodium.Blamer.Heuristics
-
-import Debug.Trace
 
 -- | An instance for storing the axioms in the TGState
 instance Monad m => HasAxioms (TGStateM m axiom touchable types constraint ci) axiom where
     -- initializeAxioms :: [axiom] -> m ()
-    initializeAxioms axioms = do
+    initializeAxioms axioms' = do
         state <- get
-        put (state{axioms = axioms})  
+        put (state{axioms = axioms'})  
     -- getAxioms :: m [axiom]
     getAxioms = do
         state <- get
@@ -95,7 +91,7 @@ instance (Show axiom, Ord touchable, Monad m, Show touchable, Show types, Show c
                         else (p1 >= currentPrior) && ((p2 < currentPrior) || (t1 > t2))-}
                         )
                 (Just _, Nothing) -> return False
-                (Nothing, Just p2) -> return True
+                (Nothing, Just _) -> return True
                 _ -> return (t1 > t2)
     setGivenTouchables touchables = do
         s <- get

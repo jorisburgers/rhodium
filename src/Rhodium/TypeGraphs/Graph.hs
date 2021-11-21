@@ -35,16 +35,12 @@ module Rhodium.TypeGraphs.Graph(
     isConstraintEdge
 ) where
 
-import Control.Arrow
+import Data.Maybe (fromMaybe, mapMaybe)
 
-import Data.Maybe
-import Data.Function
-import Data.List
 import qualified Data.Map.Strict as M
 
-import Rhodium.Solver.Rules
+import Rhodium.Solver.Rules (Rule, ErrorLabel)
 
-import Debug.Trace
 
 -- | The id of the vertex
 type VertexId = Int
@@ -77,31 +73,29 @@ instance (Show touchable, Show types, Show constraint) => Show (TGGraph touchabl
         )
 
 -- | Combines the id and the category of a vertex into a single value
-newtype TGVertex touchable types = TGVertex{tgVertex :: (VertexId, TGVertexCategory touchable types)}
+newtype TGVertex touchable types = TGVertex {tgVertex :: (VertexId, TGVertexCategory touchable types)}
     deriving Show
 
 -- | Describes the kinds of vertices that are available in type graphs
 data TGVertexCategory touchable types 
     -- | A variable vertex that might be used to unify
-    = TGVariable{
-            variable :: touchable, -- ^The variable that might be unified
-            isTouchable :: Maybe Priority, -- ^ Whether the variable can be touched
-            representation :: [String]
+    = TGVariable
+        {   variable :: touchable -- ^The variable that might be unified
+        ,   isTouchable :: Maybe Priority -- ^ Whether the variable can be touched
+        ,   representation :: [String]
         }
     -- | A constant type, such as @Int@ or @Bool@
-    | TGConstant{
-            constant :: String -- ^The name of the constant
+    | TGConstant
+        {   constant :: String -- ^The name of the constant
         }
     -- | Represent the type that consists of multiple type vertices, such as an application
-    | TGApplication{
-            typeRep :: types -- ^ The type the vertex originally represented
+    | TGApplication
+        {   typeRep :: types -- ^ The type the vertex originally represented
         }
-    | TGConstraintApplication{
-
-        }
-    | TGScopedVariable{
-        typeRep :: types, -- ^ The type of the scoped variable, including the variable
-        variable :: touchable
+    | TGConstraintApplication
+    | TGScopedVariable
+        { typeRep :: types -- ^ The type of the scoped variable, including the variable
+        , variable :: touchable
         }
     | TGDeadNode -- ^ This represents a node without a value, this can be used for constraints that only describe a single other node, like @Eq a@.
     deriving (Ord, Eq, Show)
@@ -118,11 +112,11 @@ data TGEdge constraint
     deriving (Eq)
 
 instance Show constraint => Show (TGEdge constraint) where
-    show (TGEdge from to edgeId original ec@TGConstraint{}) = concat ([
+    show (TGEdge from' to' edgeId' original' ec@TGConstraint{}) = concat ([
         "{"
-        , show edgeId, "=>"
-        ,  fixedLenghtString 2 (show from) ++ " -> " ++ fixedLenghtString 3 (show to)
-        , " original? : ", show original, " "
+        , show edgeId', "=>"
+        ,  fixedLenghtString 2 (show from') ++ " -> " ++ fixedLenghtString 3 (show to')
+        , " original? : ", show original', " "
         , " constraint : " ++ fixedLenghtString 20 (show (constraint ec))
         , " isGiven : " ++ fixedLenghtString 5 (show (isGiven ec))
         , " p: " ++ show (priority ec)
@@ -139,10 +133,10 @@ instance Show constraint => Show (TGEdge constraint) where
         ++
         [ "}"
         ])
-    show (TGEdge from to edgeId original ec@TGType{}) = concat [
+    show (TGEdge from' to' _edgeId original' ec@TGType{}) = concat [
         "{"
-        , fixedLenghtString 3 (show from) ++ " -> " ++ fixedLenghtString 3 (show to)
-        , " original? : ", show original
+        , fixedLenghtString 3 (show from') ++ " -> " ++ fixedLenghtString 3 (show to')
+        , " original? : ", show original'
         , "ordering : ", fixedLenghtString 2 (show (ordering ec))
         , "}"
         ]
@@ -160,20 +154,20 @@ data IsResolved
 -- | The kind of the edge
 data TGEdgeCategory constraint 
     -- | A constraint edge
-    = TGConstraint{
-        constraint :: constraint, -- ^ The original constraint
-        isGiven :: Bool, -- ^ Whether the constraint is given or wanted
-        isResolved :: [(Groups, IsResolved)], -- ^ Whether the constraint is resolved
-        isIncorrect :: Maybe ErrorLabel, -- ^ Whether the constraint is incorrect, Nothing means unresolved or no error
-        basedOn :: [EdgeId], -- ^ The list of edges on which this edge is directly based
-        rulesTried :: [RulesTried],
-        groups :: Groups,
-        priority :: Priority, -- ^ The priority of the constraint, the lowest constraints get resolved first
-        influences :: [EdgeId]
+    = TGConstraint
+        { constraint :: constraint -- ^ The original constraint
+        , isGiven :: Bool -- ^ Whether the constraint is given or wanted
+        , isResolved :: [(Groups, IsResolved)] -- ^ Whether the constraint is resolved
+        , isIncorrect :: Maybe ErrorLabel -- ^ Whether the constraint is incorrect, Nothing means unresolved or no error
+        , basedOn :: [EdgeId] -- ^ The list of edges on which this edge is directly based
+        , rulesTried :: [RulesTried]
+        , groups :: Groups
+        , priority :: Priority -- ^ The priority of the constraint, the lowest constraints get resolved first
+        , influences :: [EdgeId]
         }
     -- | An edge that links two types
-    | TGType{
-        ordering :: Int -- ^ The ordering between the edges that have the same parent
+    | TGType
+        {   ordering :: Int -- ^ The ordering between the edges that have the same parent
         }
     deriving (Eq, Show)
 
@@ -284,11 +278,11 @@ mergeGraphsWithEdges    :: (Ord types, Eq types, Eq constraint, Eq touchable, Co
                         -> TGGraph touchable types constraint ci -- ^ The first source graph
                         -> TGGraph touchable types constraint ci -- ^ The second source graph
                         -> TGGraph touchable types constraint ci -- ^ The resulting graph
-mergeGraphsWithEdges combineConstants es g1 g2 = let
+mergeGraphsWithEdges _combineConstants es g1 g2 = let
         v1 = vertices g1
         v2 = vertices g2
         g2Mapping = typeMapping g2 `M.union` constructTypeMapping g2
-        v12Mapping = M.elems $ M.intersectionWith (\v1 v2 -> (v2, v1)) (typeMapping g1) g2Mapping
+        v12Mapping = M.elems $ M.intersectionWith ((,)) (typeMapping g1) g2Mapping
         nv = M.filterWithKey (\k _ -> k `notElem` map fst v12Mapping) v2
         g2' = edgeSubstitution v12Mapping g2
     in TGGraph{
@@ -311,19 +305,19 @@ constructTypeMapping :: (Ord types, ConvertConstructor types, CanCompareTouchabl
 constructTypeMapping g = M.fromList $ mapMaybe (\(v, vc) -> 
     case vc of 
         TGConstant c -> Just (convertConstructor c, v)
-        vc@TGVariable{} -> Just (convertTouchable (variable vc), v)
-        ta@TGApplication{} -> Just (typeRep ta, v)
+        TGVariable{} -> Just (convertTouchable (variable vc), v)
+        TGApplication{} -> Just (typeRep vc, v)
         TGConstraintApplication{} -> Nothing
         TGDeadNode{} -> Nothing
-        sv@TGScopedVariable{} -> Just (typeRep sv, v)
+        TGScopedVariable{} -> Just (typeRep vc, v)
     ) $ M.toList (vertices g)
                                    
 
 -- | Get a touchable from a category, if the touchable exists
 getVariable :: TGVertexCategory touchable types -> Maybe (NodeValue touchable types)
-getVariable v@TGVariable{} = Just (Variable $ variable v)
-getVariable v@TGDeadNode{} = Just Dead
-getVariable _              = Nothing
+getVariable v@TGVariable{}  = Just (Variable $ variable v)
+getVariable TGDeadNode{}    = Just Dead
+getVariable _               = Nothing
 
 -- | Creates a new edge based on a constraint
 constraintEdge  :: EdgeId -- ^ The id of the edge
@@ -336,20 +330,20 @@ constraintEdge  :: EdgeId -- ^ The id of the edge
                 -> VertexId -- ^ The source vertex id
                 -> VertexId -- ^ The target vertex id
                 -> TGEdge constraint -- ^ The resulting edge
-constraintEdge edgeId parents constraint original isGiven gs priority from to = TGEdge{
-        from = from,
-        to = to,
-        edgeId = edgeId,
-        original = original,
+constraintEdge edgeId' parents constraint' original' isGiven' gs priority' from' to' = TGEdge{
+        from = from',
+        to = to',
+        edgeId = edgeId',
+        original = original',
         edgeCategory = TGConstraint{
-            constraint = constraint,
-            isGiven = isGiven,
+            constraint = constraint',
+            isGiven = isGiven',
             isResolved = [(gs, UnResolved)],
             isIncorrect = Nothing,
             basedOn = parents,
             rulesTried = [],
             groups = gs,
-            priority = priority,
+            priority = priority',
             influences = []
         }
     }
@@ -361,57 +355,23 @@ typeEdge    :: EdgeId -- ^ The edge id
             -> VertexId -- ^ The source vertex id
             -> VertexId -- ^ The target vertex id
             -> TGEdge constraint -- ^ The resulting constraint
-typeEdge edgeId ordering original from to = TGEdge{
-        from = from,
-        to = to,
-        edgeId = edgeId,
-        original = original,
-        edgeCategory = TGType{
-            ordering = ordering
-        }
-    }
+typeEdge edgeId' ordering' original' from' to' = TGEdge
+    {   from = from'
+    ,   to = to'
+    ,   edgeId = edgeId'
+    ,   original = original'
+    ,   edgeCategory = TGType ordering'
+    }      
 
-
-getChildNodes   :: TGGraph touchable types constraint ci
-                -> VertexId
-                -> [VertexId]
-getChildNodes graph v = getChildNodes' [] v ++ parentNode v
-    where 
-        parentNode :: VertexId -> [VertexId]
-        parentNode cv = let
-            upEdges = filter (\e -> isTypeEdge e && to e == cv) (M.elems $ edges graph)
-            parents = filter (\(_, e) -> isApplication e || isDeadNode e) $ map ((`getVertexFromId` graph) . from) upEdges
-            in if null parents then [cv] else concatMap (parentNode . fst) parents
-        getChildNodes' found v = 
-            let
-                downEdges = filter (\e -> isTypeEdge e && from e == v) (M.elems $ edges graph)
-            in v : concatMap (getChildNodes' (v : found)) (map to downEdges \\ (v:found))
-
-
-isApplication :: TGVertexCategory touchable types -> Bool
-isApplication TGApplication{} = True
-isApplication TGConstraintApplication{} = True
-isApplication _ = False
-            
-isDeadNode :: TGVertexCategory touchable types -> Bool
-isDeadNode TGDeadNode{} = True
-isDeadNode _ = False
-
-        
+       
 -- | Retrieves a vertex from the graph by id
 getVertexFromId :: VertexId -> TGGraph touchable types constraint ci -> (VertexId, TGVertexCategory touchable types)
 getVertexFromId vi graph = maybe (error $ "Unknown vertex id: " ++ show vi) (\vc -> (vi, vc)) (M.lookup vi (vertices graph))
 
-getVerticesFromId :: [VertexId] -> TGGraph touchable types constraint ci -> [(VertexId, TGVertexCategory touchable types)]
-getVerticesFromId vis graph = map (`getVertexFromId` graph) vis
-
 -- | Returns the first matching edge with the provided id
 getEdgeFromId :: TGGraph touchable types constraint ci -> EdgeId -> TGEdge constraint
-getEdgeFromId graph id = fromMaybe (error "Unknown edge id") (M.lookup id (edges graph))
+getEdgeFromId graph eid = fromMaybe (error "Unknown edge id") (M.lookup eid (edges graph))
 
-isTypeEdge :: TGEdge constraint -> Bool
-isTypeEdge TGEdge{edgeCategory = TGType{}} = True
-isTypeEdge _ = False
 
 -- | The touchable and the type can be compared to be equal
 class CanCompareTouchable touchable types | types -> touchable where

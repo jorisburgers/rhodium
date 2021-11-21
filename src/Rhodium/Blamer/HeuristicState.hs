@@ -9,4 +9,5 @@ data HeuristicState m axiom touchable types constraint ci = HeuristicState{
 } deriving Show
 
 -- | An empty heuristic state
+emptyHeuristicState :: HeuristicState m axiom touchable types constraint ci
 emptyHeuristicState = HeuristicState []

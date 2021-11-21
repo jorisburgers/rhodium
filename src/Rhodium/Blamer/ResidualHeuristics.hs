@@ -4,22 +4,13 @@
 module Rhodium.Blamer.ResidualHeuristics where
 
 import Rhodium.TypeGraphs.Graph
-import Rhodium.TypeGraphs.GraphUtils
 import Rhodium.TypeGraphs.GraphProperties
-import Rhodium.TypeGraphs.GraphReset
 
 import Rhodium.Blamer.Path
-import Rhodium.Blamer.ErrorUtils
 
-import Rhodium.Solver.Rules
-import Rhodium.Solver.Simplifier
-
-import Control.Monad
-
-import Data.Maybe
 import Data.List
 
-import Debug.Trace
+
 
 -- | A list of heuristics
 type ResidualHeuristics m axiom touchable types constraint ci = Path m axiom touchable types constraint ci -> [ResidualHeuristic m axiom touchable types constraint ci]

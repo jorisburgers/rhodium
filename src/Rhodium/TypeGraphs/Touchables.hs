@@ -2,13 +2,11 @@
 -- | A module regarding the touchability of variables
 module Rhodium.TypeGraphs.Touchables where
 
-import Control.Monad
+import Control.Monad (mplus)
 
 import qualified Data.Map as M
 
-import Data.Maybe
-
-import Rhodium.TypeGraphs.Graph
+import Rhodium.TypeGraphs.Graph (Priority, TGGraph (..), TGVertexCategory (..))
 
 -- | Returns a fresh variable
 class Monad m => FreshVariable m a where

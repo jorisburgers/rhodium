@@ -9,19 +9,15 @@ module Rhodium.Solver.SolveResult(
     graphToSolveResult
 ) where
 
-import Rhodium.TypeGraphs.Touchables
 import Rhodium.TypeGraphs.Graph
 import Rhodium.TypeGraphs.GraphUtils hiding (getSubstitutionFromGraph)
 import Rhodium.TypeGraphs.GraphProperties
 import Rhodium.Solver.Rules
 
-import Control.Arrow
-
 import Data.List
 import Data.Maybe
-import qualified Data.Map as M
 
-import Debug.Trace
+import qualified Data.Map as M
 
 -- | The result of the solver
 data SolveResult touchable types constraint ci = SolveResult{
@@ -36,38 +32,23 @@ data SolveResult touchable types constraint ci = SolveResult{
 emptySolveResult :: SolveResult touchable types constraint ci
 emptySolveResult = SolveResult [] [] [] [] emptyTGGraph
 
--- | Add a variable as touchable in the result
-addTouchable :: touchable -> SolveResult touchable types constraint ci -> SolveResult touchable types constraint ci
-addTouchable t sr = sr{
-        touchables = t : touchables sr
-    }
-
--- | Add a list of touchables to the result
-addTouchables :: [touchable] -> SolveResult touchable types constraint ci -> SolveResult touchable types constraint ci
-addTouchables ts sr = foldr addTouchable sr ts
-
--- | Set the graph in the solver result
-setGraph :: TGGraph touchable types constraint ci -> SolveResult touchable types constraint ci -> SolveResult touchable types constraint ci
-setGraph g sr = sr{
-    graph = g
-}
 -- | Convert a graph to a SolveResult
 graphToSolveResult ::  (Show ci, HasConstraintInfo constraint ci, Eq types, Eq touchable, Show types, Show touchable, Show constraint, IsEquality types constraint touchable, CanCompareTouchable touchable types) => Bool -> [touchable] -> TGGraph touchable types constraint ci -> SolveResult touchable types constraint ci
 graphToSolveResult allowTouchable ts g = let
-    bg = nub $ filter (\g -> length g == 1) $ map getGroupFromEdge $ filter isConstraintEdge $ M.elems (edges g)
+    bg = nub $ filter (\g'' -> length g'' == 1) $ map getGroupFromEdge $ filter isConstraintEdge $ M.elems (edges g)
     g' =  markEdgesUnresolved (head bg) g
-    (subEdges, resEdges) = partition (isSubstitutionEdge allowTouchable ts g') 
+    (subEdges, resEdges) = partition (isSubstitutionEdge allowTouchable g') 
         (if allowTouchable then getUnresolvedConstraintEdges' g' else getUnresolvedConstraintEdges (head bg) g')
-    touchables = map fst $ getTouchablesFromGraph allowTouchable g'
-    substitution = getSubstitutionFromGraph g' (nub $ ts ++ touchables) subEdges
-    smallGiven = getSmallGiven g'
-    errors = getErrorsFromGraph g' resEdges
-    in SolveResult (nub $ ts ++ touchables) substitution smallGiven errors g'
+    touchables' = map fst $ getTouchablesFromGraph allowTouchable g'
+    substitution' = getSubstitutionFromGraph (nub $ ts ++ touchables') subEdges
+    smallGiven' = getSmallGiven g'
+    errors' = getErrorsFromGraph g' resEdges
+    in SolveResult (nub $ ts ++ touchables') substitution' smallGiven' errors' g'
 
 
 
-isSubstitutionEdge :: (Show types, Show touchable, Show constraint, IsEquality types constraint touchable) => Bool -> [touchable] -> TGGraph touchable types constraint ci -> TGEdge constraint -> Bool
-isSubstitutionEdge allowTouchable ts g edge     | not allowTouchable && (isEdgeGiven edge || priority (edgeCategory edge) == 0) = True
+isSubstitutionEdge :: (Show types, Show touchable, Show constraint, IsEquality types constraint touchable) => Bool -> TGGraph touchable types constraint ci -> TGEdge constraint -> Bool
+isSubstitutionEdge allowTouchable g edge     | not allowTouchable && (isEdgeGiven edge || priority (edgeCategory edge) == 0) = True
                                                 | not (allowInSubstitution (getConstraintFromEdge edge)) = False
                                                 | not allowTouchable && not (isConstraintTouchable 0 g edge) = False
                                                 | not allowTouchable && priority (edgeCategory edge) > 1 = False
@@ -81,12 +62,12 @@ getTouchablesFromGraph allowTouchable g = mapMaybe getTouchable (M.toList (verti
                                             | otherwise = Nothing
         getTouchable _                      = Nothing
 
-getSubstitutionFromGraph :: (Eq types, Show touchable, Show types, Show constraint, IsEquality types constraint touchable, CanCompareTouchable touchable types) => TGGraph touchable types constraint ci -> [touchable] -> [TGEdge constraint] -> [(touchable, types)]
-getSubstitutionFromGraph g touchables constraints = let 
-        initialSub = map (\v -> (v, convertTouchable v)) touchables
+getSubstitutionFromGraph :: (Eq types, Show touchable, Show types, Show constraint, IsEquality types constraint touchable, CanCompareTouchable touchable types) => [touchable] -> [TGEdge constraint] -> [(touchable, types)]
+getSubstitutionFromGraph ts constraints = let 
+        initialSub = map (\v -> (v, convertTouchable v)) ts
         splitConstraints = map (splitEquality . getConstraintFromEdge) constraints
-        findSub var tp = fromMaybe tp (lookup tp splitConstraints) 
-    in map (\(v, t) -> (v, findSub v t)) initialSub
+        findSub tp = fromMaybe tp (lookup tp splitConstraints) 
+    in map (\(v, t) -> (v, findSub t)) initialSub
 
            
 getErrorsFromGraph :: (Show ci, HasConstraintInfo constraint ci, IsEquality types constraint touchable, Show constraint, Show types, Show touchable) => TGGraph touchable types constraint ci -> [TGEdge constraint] -> [(ci, constraint, ErrorLabel)]

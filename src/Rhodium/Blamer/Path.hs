@@ -16,8 +16,6 @@ import Rhodium.Solver.Rules
 
 import Rhodium.Blamer.ErrorUtils
 
-import Debug.Trace
-
 -- | A modifier that can modify a graph based on a residual error
 type GraphModifier m axiom touchable types constraint ci = (EdgeId, constraint, ci) -> TGGraph touchable types constraint ci -> m (TGGraph touchable types constraint ci, ci)
 
@@ -26,7 +24,7 @@ data Path m axiom touchable types constraint ci = Path (EdgeId, constraint, Erro
 
 -- | Show instance for the path
 instance (Show constraint) => Show (Path m axiom touchable types constraint ci) where
-    show p@(Path (eid, constraint, el) ids) = "Path(" ++ show eid ++ ", " ++ show constraint ++ ", " ++ show el ++ ") " ++ show (idsFromPath p)
+    show p@(Path (eid, constraint', el) _ids) = "Path(" ++ show eid ++ ", " ++ show constraint' ++ ", " ++ show el ++ ") " ++ show (idsFromPath p)
 
 instance (Eq constraint) => Eq (Path m axiom touchable types constraint ci) where
     (Path t1 ids1) == (Path t2 ids2) = t1 == t2 && let f = map (\(c, eid, _, _) -> (c, eid)) in f ids1 == f ids2
@@ -37,12 +35,11 @@ extendErrorEdges ::  (Show constraint, HasConstraintInfo constraint ci, Eq const
 extendErrorEdges gm f g = let 
     errorEdges = f (M.elems $ edges g)
     se = map (\(edge, label) -> ((edgeId edge, getConstraintFromEdge edge, label), getPath g edge)) errorEdges
-    --cg = sortOn snd $ map (\s -> (head s, length s)) se
     res = map (\(l, es) -> Path l $ mapMaybe (\e -> let ci = getConstraintInfo (getConstraintFromEdge e) in 
             if isJust ci then 
                 Just (getConstraintFromEdge e, edgeId e, fromJust ci, gm)
             else 
-                Nothing -- error $ "Constraint is missing constraint info: " ++ show (getConstraintFromEdge e)
+                Nothing
             ) es) se
     in if any isPathEmpty res then error $ show ("Path empty", res) else res
 
@@ -54,10 +51,9 @@ mergePaths :: (Ord constraint, Show constraint, Eq constraint) => [Path m axiom 
 mergePaths = nubBy same . map merge . groupBy same . sortOn constraintFromPath
         where
             same :: (Show constraint, Eq constraint) => Path m axiom touchable types constraint ci -> Path m axiom touchable types constraint ci -> Bool
-            same (Path (_, c1, l1) p1) (Path (_, c2, l2) p2) = c1 == c2 && l1 == l2 -- && (map idFromTuple p1 `isInfixOf` map idFromTuple p2 || map idFromTuple p2 `isInfixOf` map idFromTuple p1)
-            idFromTuple (_, eid, _, _) = eid
+            same (Path (_, c1, l1) _) (Path (_, c2, l2) _) = c1 == c2 && l1 == l2
             merge = foldr1 mergeP
-            mergeP (Path (eid1, c1, l1) ids1) (Path _ ids2) = Path (eid1, c1, l1) (unionBy (\(_, eid1, _, _) (_, eid2, _, _) -> eid1 == eid2) ids1 ids2)
+            mergeP (Path (eid1, c1, l1) ids1) (Path _ ids2) = Path (eid1, c1, l1) (unionBy (\(_, eid2, _, _) (_, eid3, _, _) -> eid2 == eid3) ids1 ids2)
 
 -- | Get a list of ids from a path
 idsFromPath :: Path m axiom touchable types constraint ci -> [EdgeId]
@@ -65,7 +61,7 @@ idsFromPath (Path _ ps) = map (\(_, ei, _, _) -> ei) ps
 
 -- | Get the original error constraint from the path
 constraintFromPath :: Path m axiom touchable types constraint ci -> constraint
-constraintFromPath (Path (_, constraint, _) _) = constraint
+constraintFromPath (Path (_, constraint', _) _) = constraint'
 
 labelFromPath :: Path m axiom touchable types constraint ci -> ErrorLabel
 labelFromPath (Path (_, _, l) _) = l
@@ -91,12 +87,12 @@ emptyPath :: HasTypeGraph m axiom touchable types constraint ci => Path m axiom 
 emptyPath = Path (undefined, undefined, NoErrorLabel) []
 
 defaultRemoveModifier :: HasTypeGraph m axiom touchable types constraint ci => GraphModifier m axiom touchable types constraint ci
-defaultRemoveModifier (eid, constraint, ci) g = removeEdge eid g >>= \g' -> return (g', ci)
+defaultRemoveModifier (eid, _constraint, ci) g = removeEdge eid g >>= \g' -> return (g', ci)
 
 
 -- | Creates a default graph modifier, either adding a new given constraint or making an untouchable variable touchable
 defaultResidualGraphModifier :: HasTypeGraph m axiom touchable types constraint ci => GraphModifier m axiom touchable types constraint ci
-defaultResidualGraphModifier (eid, constraint, ci) graph = 
+defaultResidualGraphModifier (eid, _constraint, ci) graph = 
     do 
     let edge = getEdgeFromId graph eid
     let g = resetAll graph
@@ -110,8 +106,10 @@ defaultResidualGraphModifier (eid, constraint, ci) graph =
 isPathEmpty :: Path m axiom touchable types constraint ci -> Bool
 isPathEmpty (Path _ xs) = null xs
 
+isResidualPath :: Path m axiom touchable types constraint ci -> Bool
 isResidualPath (Path (_, _, l) _) = l == labelResidual
 
+constraintsFromPath :: Path m axiom touchable types constraint ci -> [constraint]
 constraintsFromPath (Path _ cs) = map (\(c, _, _, _) -> c) cs
 
 sortPaths :: Show constraint => [Path m axiom touchable types constraint ci] -> [Path m axiom touchable types constraint ci]

@@ -14,32 +14,19 @@ module Rhodium.Core(
 
 import Rhodium.Blamer.ErrorUtils
 import Rhodium.Blamer.Blamer
-import Rhodium.Blamer.Heuristics
 import Rhodium.TypeGraphs.Touchables
 import Rhodium.TypeGraphs.GraphProperties
-import Rhodium.TypeGraphs.GraphInstances
-import Rhodium.TypeGraphs.TGState
+import Rhodium.TypeGraphs.TGState (runTG)
 import Rhodium.TypeGraphs.Graph
 import Rhodium.TypeGraphs.GraphUtils
-import Rhodium.Solver.SolveResult
+import Rhodium.Solver.SolveResult (SolveResult (errors, substitution), graphToSolveResult)
 import Rhodium.Solver.SolveOptions
 import Rhodium.Solver.Simplifier
-import Rhodium.Solver.Rules
 
-
-import Control.Arrow
-import Control.Monad.Trans.State
-import Control.Monad.Trans.Class
-import Control.Monad
-
-
-import Data.Maybe
-import qualified Data.Map.Strict as M
-
-import Debug.Trace
+import Control.Monad.IO.Class (MonadIO )
 
 -- | Given a list of axioms, given constraints, wanted constraints and a number of touchables, solve solves the constraints using OutsideIn(X)
-solve :: (HasTypeGraph m axiom touchable types constraint ci) => SolveOptions m axiom touchable types constraint ci -> [axiom] -> [constraint] -> [constraint] -> [touchable] -> m (SolveResult touchable types constraint ci)
+solve :: (HasTypeGraph m axiom touchable types constraint ci, MonadIO m) => SolveOptions m axiom touchable types constraint ci -> [axiom] -> [constraint] -> [constraint] -> [touchable] -> m (SolveResult touchable types constraint ci)
 solve options axioms given wanted touchables = do
     initializeAxioms axioms
     g <- constructGraph given wanted touchables
@@ -62,7 +49,7 @@ constructGraph given wanted touchables = do
         return (markEdgesUnresolved [0] gTouchables)
 
 -- | Solves the given constraints and either returns a substitution or Nothing. Gives manual control over the solve options
-unifyTypes' :: (HasTypeGraph m axiom touchable types constraint ci) => SolveOptions m axiom touchable types constraint ci -> [axiom] -> [constraint] -> [constraint] -> [touchable] -> m (Maybe [(touchable, types)])
+unifyTypes' :: (HasTypeGraph m axiom touchable types constraint ci, MonadIO m) => SolveOptions m axiom touchable types constraint ci -> [axiom] -> [constraint] -> [constraint] -> [touchable] -> m (Maybe [(touchable, types)])
 unifyTypes' opts axioms given wanted touchables =
     if null given && null wanted && null touchables then
         return (Just []) 
@@ -76,5 +63,5 @@ unifyTypes' opts axioms given wanted touchables =
                 Nothing
             )
 -- | Solves the given constraints and either returns a substitution or Nothing. 
-unifyTypes :: (HasTypeGraph m axiom touchable types constraint ci) => [axiom] -> [constraint] -> [constraint] -> [touchable] -> m (Maybe [(touchable, types)])
+unifyTypes :: (HasTypeGraph m axiom touchable types constraint ci, MonadIO m) => [axiom] -> [constraint] -> [constraint] -> [touchable] -> m (Maybe [(touchable, types)])
 unifyTypes = unifyTypes' emptySolveOptions

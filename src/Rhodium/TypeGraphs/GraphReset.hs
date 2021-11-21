@@ -9,30 +9,28 @@ import Data.List
 import Rhodium.TypeGraphs.Graph
 import Rhodium.TypeGraphs.GraphUtils
 import Rhodium.TypeGraphs.GraphProperties
-import Rhodium.TypeGraphs.Touchables
 
 import Rhodium.Solver.Simplifier
 
-import Debug.Trace
 
 -- | Reset a list of edges
 resetEdges :: (Show touchable, Show types, Show constraint) => [TGEdge constraint] -> TGGraph touchable types constraint ci -> TGGraph touchable types constraint ci
 resetEdges es g = let 
-    influences = nub (concatMap (getInfluences g . edgeId) es) \\ map edgeId es
-    in foldr resetEdge (deleteEdges influences g) es
+    influences' = nub (concatMap (getInfluences g . edgeId) es) \\ map edgeId es
+    in foldr resetEdge (deleteEdges influences' g) es
 
 -- | Reset a single edge
 resetEdge :: Show constraint => TGEdge constraint -> TGGraph touchable types constraint ci -> TGGraph touchable types constraint ci
-resetEdge e g = g{
+resetEdge e' g = g{
                 edges = M.adjust (\e -> e{
                     edgeCategory = (edgeCategory e){
                         isResolved = [([0], UnResolved)],
                         influences = [],
                         rulesTried = []
                         }
-                    }) (edgeId e) (edges g),
-                unresolvedConstraints = e{
-                        edgeCategory = (edgeCategory e){
+                    }) (edgeId e') (edges g),
+                unresolvedConstraints = e'{
+                        edgeCategory = (edgeCategory e'){
                             isResolved = [([0], UnResolved)],
                             influences = [],
                             rulesTried = []

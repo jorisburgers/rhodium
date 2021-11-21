@@ -44,6 +44,7 @@ isErrorResult _ = False
 -- | Get the error label from a RuleResult
 getErrorLabel :: RuleResult a -> ErrorLabel
 getErrorLabel (Error el) = el
+getErrorLabel _ = error "Trying to get error from non-error result"
 
 -- | Check if a rule was applied and return the result as a Maybe
 isApplied :: RuleResult a -> Maybe a
@@ -51,8 +52,13 @@ isApplied (Applied a) = Just a
 isApplied _ = Nothing
 
 -- | Label for residual constraints
+labelResidual :: ErrorLabel
 labelResidual = ErrorLabel "Residual constraint"
+
 -- | Label for incorrect constructors
+labelIncorrectConstructors :: ErrorLabel
 labelIncorrectConstructors = ErrorLabel "Incorrect constructors"
+
 -- | Label for infinite types
+labelInfiniteType :: ErrorLabel
 labelInfiniteType = ErrorLabel "Infinite type"

@@ -1,0 +1,15 @@
+name: rhodium
+version: 0.1.0.0
+synopsis: Rhodium is a modification of the OutsideIn(X) algorithm for detecting type errors using heuristics.
+license: BSD3
+github: jorisburgers/rhodium
+
+dependencies:
+  - base 
+  - transformers
+  - containers
+
+ghc-options: -Wall -Werror
+
+library:
+  source-dirs: src

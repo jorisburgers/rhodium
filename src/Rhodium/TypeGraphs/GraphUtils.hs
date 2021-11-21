@@ -5,18 +5,40 @@
 module Rhodium.TypeGraphs.GraphUtils where
 
 import Rhodium.TypeGraphs.Graph
-import Rhodium.TypeGraphs.GraphProperties
-import Rhodium.Solver.Rules
+    ( CanCompareTouchable (..)
+    , EdgeId
+    , Groups
+    , IsResolved(..)
+    , Priority
+    , RulesTried (..)
+    , TGEdge (..)
+    , TGEdgeCategory (..)
+    , TGGraph (..)
+    , TGVertexCategory (..)
+    , VertexId
+    , isConstraintEdge
+    , getGroupFromEdge 
+    , getEdgeFromId
+    , getVertexFromId
+    )
+import Rhodium.TypeGraphs.GraphProperties 
+    ( CompareTypes (..)
+    , FreeVariables (..)
+    , HasConstraintInfo (..)
+    , HasGraph (..)
+    , HasTypeGraph
+    , IsEquality (..)
+    , getGraph
+    )
+import Rhodium.Solver.Rules (Rule (..), ErrorLabel (..), labelResidual)
 
 import qualified Data.Map.Strict as M
 
-import Data.List
-import Data.Maybe
-import Data.Function
+import Data.List (nub, isSuffixOf, sortBy, intersect, delete)
+import Data.Maybe (mapMaybe, isJust, fromMaybe, catMaybes)
+import Data.Function (on)
 
-import Control.Arrow
-
-import Debug.Trace
+import Control.Arrow (second)
 
 -- | Checks whether an adge is a type edge
 isTypeEdge :: TGEdge constraint -> Bool
@@ -34,7 +56,7 @@ getIsIncorrect _ = error "Edge is not a constraint edge"
 
 -- | Get if and how a constraint edge is resolved
 getResolved :: Groups -> TGEdge constraint -> IsResolved
-getResolved groups edge@TGEdge{edgeCategory = TGConstraint{}} = fromMaybe UnResolved $ lookup groups $ isResolved (edgeCategory edge)
+getResolved groups' edge@TGEdge{edgeCategory = TGConstraint{}} = fromMaybe UnResolved $ lookup groups' $ isResolved (edgeCategory edge)
 getResolved _ _ = error "Not a constraint edge"
 
 -- | Checks whether an edge is given (or wanted)
@@ -53,18 +75,15 @@ getConstraintFromEdge x = error $ "Edge doesn't have a constraint" ++ show x
 
 -- | Marks an edge as incorrect
 makeIncorrect   :: Eq constraint 
-                => Groups
-                -> IsResolved -- ^ Indicate how the error is resolved
-                -> ErrorLabel -- ^ Which label is given to the error
+                => ErrorLabel -- ^ Which label is given to the error
                 -> TGEdge constraint -- ^ What edge should mark
                 -> TGGraph touchable types constraint ci -- ^ The graph the edge is in
                 -> TGGraph touchable types constraint ci -- ^ The resulting graph
-makeIncorrect groups isR el edge g = 
+makeIncorrect el edge g = 
         g{
             edges = M.adjust (\e -> 
                 e{ edgeCategory = (edgeCategory edge){
                     isIncorrect = Just el
-                    --isResolved = (groups, isR) : filter ((groups/=) . fst) (isResolved (edgeCategory e))
                 }}) (edgeId edge) (edges g),
             unresolvedConstraints = delete edge (unresolvedConstraints g)
         }
@@ -76,16 +95,16 @@ markEdgeResolved    :: (Eq constraint)
                     -> TGEdge constraint -- ^ The edge that is resolved
                     -> TGGraph touchable types constraint ci -- ^ The graph the edge is in
                     -> TGGraph touchable types constraint ci -- ^ The resulting graph
-markEdgeResolved groups ir edge g = g{
+markEdgeResolved groups' ir edge g = g{
         edges = M.adjust (\e -> e{ edgeCategory = (edgeCategory e){
-            isResolved = (groups, ir) : filter ((groups/=) . fst) (isResolved (edgeCategory e))
+            isResolved = (groups', ir) : filter ((groups' /=) . fst) (isResolved (edgeCategory e))
             }}) (edgeId edge) (edges g),
         unresolvedConstraints = delete edge (unresolvedConstraints g)
     }
 
 -- | Mark that an edge is tried, maybe in combination with some other edges.
 markEdgeTried :: RulesTried -> TGEdge constraint -> TGGraph touchable types constraint ci -> TGGraph touchable types constraint ci
-markEdgeTried rt e g = g{
+markEdgeTried rt e' g = g{
         edges = M.adjust (\e -> e{
             edgeCategory = (edgeCategory e){
                 rulesTried = 
@@ -93,6 +112,7 @@ markEdgeTried rt e g = g{
                         alreadyTried = rulesTried (edgeCategory e)
                         rt' = mergeRules alreadyTried
                         mergeMR ms (MultiRule r ms') = MultiRule r (ms' ++ ms)
+                        mergeMR _ _ = error "Cannot merge single rule"
                         mergeRules [] = [rt]
                         mergeRules (x@(SingleRule _) : xs)   
                             | x == rt = x : xs
@@ -101,16 +121,17 @@ markEdgeTried rt e g = g{
                             | x == rt = mergeMR m rt : xs
                             | otherwise = x : mergeRules xs                      
                 in rt'}
-        }) (edgeId e) (edges g)
+        }) (edgeId e') (edges g)
     }
 
 -- | Return the edges that were used in a multirule.
 getEdgesFromMultirule :: RulesTried -> [EdgeId]
 getEdgesFromMultirule (MultiRule _ xs) = xs
+getEdgesFromMultirule (SingleRule _) = error "Cannot get edges from single rule"
 
 -- | Return a list of edges that are not yet resolved
 getUnresolvedConstraintEdges :: Show constraint => Groups -> TGGraph touchable types constraint ci -> [TGEdge constraint]
-getUnresolvedConstraintEdges groups graph = filter (isUnresolvedConstraintEdge groups) (M.elems $ edges graph)
+getUnresolvedConstraintEdges groups' graph = filter (isUnresolvedConstraintEdge groups') (M.elems $ edges graph)
 
 -- | Get all the unresolved constraint from a graph
 getUnresolvedConstraintEdges' :: TGGraph touchable types constraint ci -> [TGEdge constraint]
@@ -137,6 +158,7 @@ getPath :: (Show constraint, Eq constraint) => TGGraph touchable types constrain
 getPath graph edge@TGEdge{edgeCategory=tgc@TGConstraint{}}  
                     | isEdgeOriginal edge = [edge]
                     | otherwise = let xs = nub $ concatMap (getPath graph . getEdgeFromId graph) (basedOn tgc) in if null xs then error (show ("Empty", edge)) else xs
+getPath _ _ = error "Trying to get a path from a non-constraint edge"
 
 -- | Get the influences from an edge
 getInfluences :: TGGraph touchable types constraint ci -> EdgeId -> [EdgeId]
@@ -230,11 +252,11 @@ getGroupsFromGraph g = nub $ concatMap (\e -> [getGroupFromEdge e | isConstraint
 
 -- | Checks whether an edge is unresolved in the given group
 isUnresolvedConstraintEdge :: Show constraint => Groups -> TGEdge constraint -> Bool
-isUnresolvedConstraintEdge groups edge@TGEdge{edgeCategory = TGConstraint{}} = isUnresolved' (isResolved (edgeCategory edge)) groups --any ((UnResolved ==) . snd) $ filter (\(g, r) -> g `isSuffixOf` groups) $ isResolved (edgeCategory edge)
+isUnresolvedConstraintEdge groups' edge@TGEdge{edgeCategory = TGConstraint{}} = isUnresolved' (isResolved (edgeCategory edge)) groups'
                                         where
-                                            isUnresolved' res [] = False
-                                            isUnresolved' res group@(g:gs) = maybe (isUnresolved' res gs) (== UnResolved) (lookup group res)
-isUnresolvedConstraintEdge groups _ = False
+                                            isUnresolved' _ [] = False
+                                            isUnresolved' res group@(_:gs) = maybe (isUnresolved' res gs) (== UnResolved) (lookup group res)
+isUnresolvedConstraintEdge _ _ = False
 
 -- | Determine whether a constraint is unresolved in any group
 isUnresolvedConstraintEdge' :: TGEdge constraint -> Bool
@@ -246,13 +268,13 @@ isUnresolvedConstraintEdge' _ = False
 
 -- | Checks whether an edge is unresolved in the given group
 isUnresolvedConstraintEdgeSub :: Groups -> TGEdge constraint -> Bool
-isUnresolvedConstraintEdgeSub groups edge@TGEdge{edgeCategory = TGConstraint{}} = isUnresolved' (isResolved (edgeCategory edge)) groups --any ((UnResolved ==) . snd) $ filter (\(g, r) -> g `isSuffixOf` groups) $ isResolved (edgeCategory edge)
+isUnresolvedConstraintEdgeSub groups' edge@TGEdge{edgeCategory = TGConstraint{}} = isUnresolved' (isResolved (edgeCategory edge)) groups'
                                         where
-                                            isUnresolved' res [] = False
-                                            isUnresolved' res group@(g:gs) = maybe (isUnresolved' res gs) (\x -> UnResolved == x || isSub x) (lookup group res)
+                                            isUnresolved' _ [] = False
+                                            isUnresolved' res group@(_:gs) = maybe (isUnresolved' res gs) (\x -> UnResolved == x || isSub x) (lookup group res)
                                             isSub (Resolved Substitution _) = True
                                             isSub _ = False
-isUnresolvedConstraintEdgeSub groups _ = False
+isUnresolvedConstraintEdgeSub _ _ = False
 
 
 
@@ -273,16 +295,16 @@ markEdgesUnresolved group g = g{
 
 -- | Return a list with the possible types for an type
 getPossibleTypes :: (Show touchable, Show constraint, Show types, Monad m, Eq types, IsEquality types constraint touchables, HasGraph m touchable types constraint ci, CanCompareTouchable touchables types) => Groups -> types -> m [(types, TGEdge constraint)]
-getPossibleTypes groups t = getGraph >>= \graph -> return (mapMaybe (\e -> 
+getPossibleTypes groups' t = getGraph >>= \graph -> return (mapMaybe (\e -> 
         let 
-            constraint = getConstraintFromEdge e
+            constraint' = getConstraintFromEdge e
             (t1, t2) = splitEquality (getConstraintFromEdge e)
-        in case (isEquality constraint, t1 == t, t2 == t) of 
+        in case (isEquality constraint', t1 == t, t2 == t) of 
             (False, _, _) -> Nothing
             (_, True, False) -> Just (t2, e)
             (_, False, True) -> Just (t1, e)
-            xs -> Nothing
-        ) (filter (\e -> isConstraintEdge e && (null groups || groups == getGroupFromEdge e))$ M.elems $ edges graph))
+            _ -> Nothing
+        ) (filter (\e -> isConstraintEdge e && (null groups' || groups' == getGroupFromEdge e))$ M.elems $ edges graph))
         
 -- | Get the substituted type of the given type
 getSubstType1 :: (CompareTypes m types, HasTypeGraph m axiom touchable types constraint ci) => types -> m types
@@ -290,17 +312,17 @@ getSubstType1 = getSubstTypeFull [0]
 
 -- | Get the substituted type of the given type
 getSubstTypeFull :: (CompareTypes m types, HasTypeGraph m axiom touchable types constraint ci) => Groups -> types -> m types
-getSubstTypeFull groups types = do
+getSubstTypeFull groups' types = do
     let typeFV = getFreeVariables types
     fvSub <- catMaybes <$> mapM 
-            (\fv ->     getPossibleTypes groups (convertTouchable fv) >>= 
+            (\fv ->     getPossibleTypes groups' (convertTouchable fv) >>= 
                 \pt -> 
                     if length pt == 1 then 
                         return $ Just (fv, fst $ head pt) 
                     else if length pt > 1 then
                         let 
                             pt' = map (\(t, e) -> (t, (e, influences $ edgeCategory e))) pt
-                            ptf = filter (\(t, (e, inf)) -> null (inf `intersect ` map (edgeId . fst . snd) pt') && isUnresolvedConstraintEdge' e) pt' 
+                            ptf = filter (\(_, (e, inf)) -> null (inf `intersect ` map (edgeId . fst . snd) pt') && isUnresolvedConstraintEdge' e) pt' 
                         in 
                     if length ptf > 1 then 
                         let 
@@ -311,7 +333,7 @@ getSubstTypeFull groups types = do
                             let
                                 vfpt = filter (\(v, _) -> 
                                         case getFreeVariables v of 
-                                            [fv] -> convertTouchable fv /= v
+                                            [fv'] -> convertTouchable fv' /= v
                                             _ -> True
                                         ) pt'
                             in mgu (map fst vfpt) >>= (\v -> return $ Just (fv, v))
@@ -329,9 +351,9 @@ getSubstTypeFull groups types = do
                     (Nothing, Nothing) -> Nothing
                     (Nothing, Just v2) -> Just (v2, t1)
                     (Just v1, _) -> Just (v1, t2)
-                ) $ filter (\e -> isConstraintEdge e && isGiven (edgeCategory e) && isEquality (getConstraintFromEdge e) && (null groups || groups == getGroupFromEdge e)) $ M.elems $ edges graph
+                ) $ filter (\e -> isConstraintEdge e && isGiven (edgeCategory e) && isEquality (getConstraintFromEdge e) && (null groups' || groups' == getGroupFromEdge e)) $ M.elems $ edges graph
     
-    return $ applySubstitution (getSubstitutionFromGraph groups graph) $ applySubstitution (graphToSubstition groups graph) $ applySubstitution givenSub $ applySubstitution fvSub types
+    return $ applySubstitution (getSubstitutionFromGraph groups' graph) $ applySubstitution (graphToSubstition groups' graph) $ applySubstitution givenSub $ applySubstitution fvSub types
 
 isVertexVariable :: Priority -> TGVertexCategory touchable types -> Bool
 isVertexVariable p v@TGVariable{}   = isJust (isTouchable v) && isTouchable v <= Just p
@@ -345,20 +367,29 @@ getSubstitutionFromGraph group graph = let
         initialSub = map (\t -> (t, convertTouchable t)) touchables
         mtVars = map convertTouchable touchables
         unifyC = map getConstraintFromEdge 
-                    $ filter (\e -> isConstraintEdge e && allowInSubstitution (getConstraintFromEdge e) && getGroupFromEdge e `isSuffixOf` group && let
-                        (v, m) = splitEquality (getConstraintFromEdge e) 
-                        in v `elem` mtVars && isJust (extractTouchable v)) 
+                    $ filter 
+                        (\e -> isConstraintEdge e 
+                            && allowInSubstitution (getConstraintFromEdge e) 
+                            && getGroupFromEdge e `isSuffixOf` group 
+                            && let
+                                    (v, _) = splitEquality (getConstraintFromEdge e) 
+                                in v `elem` mtVars && isJust (extractTouchable v)
+                        ) 
                     $ M.elems (edges graph)
         finalSub = map (\c -> let 
                 (v, m) = splitEquality c
-            in (fromJust (extractTouchable v), m)) unifyC
+            in (fromMaybe (error "Could not extract touchable") (extractTouchable v), m)) unifyC
     in map (second (applySubstitution finalSub)) initialSub
 
 
 -- | Convert the graph to a substitution
-graphToSubstition :: (Eq touchable, Eq types, IsEquality types constraint touchable, Show constraint, Show types, Show touchable, CanCompareTouchable touchable types) => Groups -> TGGraph touchable types constraint ci -> [(touchable, types)]
-graphToSubstition groups g = nub $ mapMaybe (\e ->
-        if isConstraintEdge e && isEquality (getConstraintFromEdge e) && (null groups || getGroupFromEdge e == groups) then
+graphToSubstition 
+    :: (Eq touchable, Eq types, IsEquality types constraint touchable, Show constraint, Show types, Show touchable, CanCompareTouchable touchable types) 
+    => Groups 
+    -> TGGraph touchable types constraint ci 
+    -> [(touchable, types)]
+graphToSubstition groups' g = nub $ mapMaybe (\e ->
+        if isConstraintEdge e && isEquality (getConstraintFromEdge e) && (null groups' || getGroupFromEdge e == groups') then
             let 
                 (m1, m2) = splitEquality (getConstraintFromEdge e)
                 v1 = extractTouchable m1                     
@@ -367,12 +398,12 @@ graphToSubstition groups g = nub $ mapMaybe (\e ->
             Nothing
     )
     (
-        filter (isUnresolvedConstraintEdgeSub groups) $ M.elems $ edges g
+        filter (isUnresolvedConstraintEdgeSub groups') $ M.elems $ edges g
     )
 
 -- | Update the constraint information at the given edges
 updateConstraintInformation :: HasConstraintInfo constraint ci => [(EdgeId, ci)] -> TGGraph touchable types constraint ci -> TGGraph touchable types constraint ci
-updateConstraintInformation eci g = foldr addCi g eci 
+updateConstraintInformation eci ginitial = foldr addCi ginitial eci 
         where
             addCi (eid, ci) g = g{
                     edges = M.adjust (\e -> e{
