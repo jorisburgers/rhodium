@@ -49,3 +49,24 @@ library
     , containers
     , transformers
   default-language: Haskell2010
+
+test-suite rhodium-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      GraphSpec
+      TestGraph
+      Paths_rhodium
+  hs-source-dirs:
+      test
+  ghc-options: -Wall -Werror
+  build-depends:
+      QuickCheck
+    , base
+    , containers
+    , hspec
+    , hspec-discover
+    , hspec-expectations
+    , rhodium
+    , transformers
+  default-language: Haskell2010

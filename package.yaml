@@ -13,3 +13,15 @@ ghc-options: -Wall -Werror
 
 library:
   source-dirs: src
+
+
+tests:
+  rhodium-test:
+    main: Spec.hs
+    source-dirs: test
+    dependencies:
+    - rhodium
+    - hspec
+    - hspec-discover
+    - hspec-expectations
+    - QuickCheck

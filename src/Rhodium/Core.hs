@@ -9,7 +9,9 @@ module Rhodium.Core(
     solve,
     runTG,
     unifyTypes,
-    unifyTypes'
+    unifyTypes',
+    -- * Testing
+    constructGraph
 ) where 
 
 import Rhodium.Blamer.ErrorUtils
